@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { getSessionUser } from "@/lib/auth";
-import { WorkMode, ApplicationStatus, Prisma } from "@prisma/client";
+import { WorkMode, EmploymentType, SourceType, JobStatus, ApplicationStatus, Prisma } from "@prisma/client";
 
 export async function GET(req: Request) {
   const sessionUser = await getSessionUser();
@@ -13,9 +13,13 @@ export async function GET(req: Request) {
   const skill = searchParams.get("skill")?.trim() || "";
   const location = searchParams.get("location")?.trim() || "";
   const workMode = searchParams.get("workMode")?.trim() || "";
+  const employmentType = searchParams.get("employmentType")?.trim() || "";
+  const sourceType = searchParams.get("sourceType")?.trim() || "";
   const priorityOnly = searchParams.get("priorityOnly") === "true";
+  const salaryDisclosedOnly = searchParams.get("salaryDisclosed") === "true";
   const minSalary = searchParams.get("minSalary") ? parseFloat(searchParams.get("minSalary")!) : null;
-  const statusFilter = searchParams.get("status")?.toUpperCase() || "ACTIVE"; // ACTIVE, SAVED, APPLIED, IGNORED, ALL
+  const maxExperience = searchParams.get("maxExperience") ? parseInt(searchParams.get("maxExperience")!, 10) : null;
+  const statusFilter = searchParams.get("status")?.toUpperCase() || "ACTIVE"; // ACTIVE, SAVED, APPLIED, IGNORED, ALL, EXPIRED
   const sort = searchParams.get("sort") || "best-match"; // best-match, newest, highest-salary, priority-first, deadline
   const page = Math.max(1, parseInt(searchParams.get("page") || "1", 10));
   const limit = Math.min(100, Math.max(1, parseInt(searchParams.get("limit") || "20", 10)));
@@ -25,9 +29,16 @@ export async function GET(req: Request) {
     const userId = sessionUser?.id;
 
     // Base WHERE conditions
-    const where: Prisma.JobWhereInput = {
-      status: "ACTIVE",
-    };
+    const where: Prisma.JobWhereInput = {};
+
+    // Status condition
+    if (statusFilter === "ALL") {
+      // Show any status
+    } else if (statusFilter === "EXPIRED") {
+      where.status = JobStatus.EXPIRED;
+    } else if (!["SAVED", "APPLIED", "IGNORED"].includes(statusFilter)) {
+      where.status = JobStatus.ACTIVE;
+    }
 
     if (search) {
       where.OR = [
@@ -55,8 +66,22 @@ export async function GET(req: Request) {
       where.workMode = workMode as WorkMode;
     }
 
+    if (employmentType && employmentType !== "ALL") {
+      where.employmentType = employmentType as EmploymentType;
+    }
+
+    if (sourceType && sourceType !== "ALL") {
+      where.source = {
+        type: sourceType as SourceType,
+      };
+    }
+
     if (priorityOnly) {
       where.isPriorityCompany = true;
+    }
+
+    if (salaryDisclosedOnly) {
+      where.salaryDisclosed = true;
     }
 
     if (minSalary) {
@@ -64,6 +89,10 @@ export async function GET(req: Request) {
         { minSalary: { gte: minSalary } },
         { maxSalary: { gte: minSalary } },
       ];
+    }
+
+    if (maxExperience !== null && !isNaN(maxExperience)) {
+      where.experienceMin = { lte: maxExperience };
     }
 
     if (skill) {
@@ -110,7 +139,7 @@ export async function GET(req: Request) {
       }
     }
 
-    // Fetch total count and jobs
+    // Fetch total count and jobs in parallel
     const [totalCount, rawJobs] = await Promise.all([
       prisma.job.count({ where }),
       prisma.job.findMany({
@@ -121,18 +150,18 @@ export async function GET(req: Request) {
           jobSkills: {
             include: { skill: true },
           },
-          jobMatches: userId
+          ...(userId
             ? {
-                where: { userId },
-                select: { score: true, reasons: true },
+                jobMatches: {
+                  where: { userId },
+                  select: { score: true, reasons: true },
+                },
+                savedJobs: {
+                  where: { userId },
+                  select: { status: true, notes: true, createdAt: true },
+                },
               }
-            : false,
-          savedJobs: userId
-            ? {
-                where: { userId },
-                select: { status: true, notes: true, createdAt: true },
-              }
-            : false,
+            : {}),
         },
         take: limit,
         skip,
@@ -176,6 +205,7 @@ export async function GET(req: Request) {
         discoveredAt: job.discoveredAt,
         isPriorityCompany: job.isPriorityCompany,
         targetCompany: job.targetCompany,
+        status: job.status,
         source: job.source,
         skills: job.jobSkills.map((js) => ({
           id: js.skill.id,
@@ -188,7 +218,7 @@ export async function GET(req: Request) {
       };
     });
 
-    // If sorting by best-match or priority-first, sort in-memory based on computed score
+    // Best-match sorting priority
     if (sort === "best-match") {
       formattedJobs.sort((a, b) => {
         if (a.isPriorityCompany && !b.isPriorityCompany) return -1;

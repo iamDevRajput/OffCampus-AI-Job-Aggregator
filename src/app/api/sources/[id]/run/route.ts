@@ -12,7 +12,7 @@ export async function POST(
   }
 
   try {
-    const results = await IngestionService.runIngestion(params.id);
+    const results = await IngestionService.runIngestion({ targetSourceId: params.id });
     return NextResponse.json({
       success: true,
       results,

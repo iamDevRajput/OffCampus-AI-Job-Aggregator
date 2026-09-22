@@ -3,6 +3,7 @@ import { SourceType, WorkMode, EmploymentType } from "@prisma/client";
 import { NormalizationService } from "../normalization.service";
 import { ExtractionService } from "../extraction.service";
 import { DeduplicationService } from "../deduplication.service";
+import { fetchWithRetry } from "@/lib/fetch-utils";
 
 export class AshbySourceAdapter implements SourceAdapter {
   sourceType: SourceType = SourceType.ASHBY;
@@ -21,16 +22,14 @@ export class AshbySourceAdapter implements SourceAdapter {
     const url = config.apiUrl || `https://api.ashbyhq.com/posting-api/job-board/${boardName}`;
 
     try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "OffCampusJobAggregator/2.0 (Compliant Educational Job Aggregator)",
-        },
-        cache: "no-store",
-      });
+      const response = await fetchWithRetry(url);
 
       if (!response.ok) {
-        throw new Error(`Ashby API returned HTTP ${response.status} (${response.statusText}) for board "${boardName}"`);
+        if (response.status === 404) {
+          console.warn(`[AshbyAdapter] Board "${boardName}" not found (404)`);
+          return [];
+        }
+        throw new Error(`Ashby API HTTP ${response.status} (${response.statusText}) for board "${boardName}"`);
       }
 
       const data = await response.json();
@@ -39,14 +38,32 @@ export class AshbySourceAdapter implements SourceAdapter {
       if (data.jobs && Array.isArray(data.jobs)) {
         for (const item of data.jobs) {
           const loc = item.location || (item.secondaryLocations && item.secondaryLocations[0]?.location) || "Pan India";
-          const desc = item.descriptionPlain || item.description || item.title;
+          const desc = item.descriptionPlain || item.description || item.title || "";
           const applyUrl = item.jobUrl || `https://jobs.ashbyhq.com/${boardName}/${item.id}`;
+
+          let rawSalary: string | undefined = undefined;
+          if (item.compensation?.compensationTierSummary) {
+            rawSalary = item.compensation.compensationTierSummary;
+          }
+
+          let workMode: WorkMode = WorkMode.NOT_SPECIFIED;
+          if (item.isRemote) workMode = WorkMode.REMOTE;
+
+          let empType: EmploymentType = EmploymentType.FULL_TIME;
+          if (item.employmentType) {
+            const empLower = item.employmentType.toLowerCase();
+            if (empLower.includes("intern")) empType = EmploymentType.INTERNSHIP;
+            else if (empLower.includes("contract")) empType = EmploymentType.CONTRACT;
+          }
 
           rawJobs.push({
             externalId: `ashby-${item.id}`,
             title: item.title?.trim() || "Software Engineer",
             company: config.name,
             location: loc,
+            workMode,
+            employmentType: empType,
+            rawSalary,
             applyUrl,
             description: desc,
             postedAt: item.publishedAt ? new Date(item.publishedAt) : new Date(),
@@ -66,7 +83,9 @@ export class AshbySourceAdapter implements SourceAdapter {
     const normalizedCompany = NormalizationService.normalizeCompany(raw.company);
     const normalizedLocation = NormalizationService.normalizeLocation(raw.location);
     const normalizedWorkMode =
-      raw.workMode || NormalizationService.normalizeWorkMode(undefined, `${raw.location} ${raw.description}`);
+      raw.workMode && raw.workMode !== WorkMode.NOT_SPECIFIED
+        ? raw.workMode
+        : NormalizationService.normalizeWorkMode(undefined, `${raw.location} ${raw.description}`);
     const normalizedEmployment =
       raw.employmentType || NormalizationService.normalizeEmploymentType(undefined, raw.title);
 
@@ -107,7 +126,7 @@ export class AshbySourceAdapter implements SourceAdapter {
   }
 
   private extractBoardFromUrl(url: string): string | null {
-    const match = url.match(/job-board\/([^/?]+)/i);
+    const match = url.match(/job-board\/([^/?]+)/i) || url.match(/ashbyhq\.com\/([^/?]+)/i);
     return match ? match[1] : null;
   }
 }

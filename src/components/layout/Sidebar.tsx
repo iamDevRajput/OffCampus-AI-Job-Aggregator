@@ -14,6 +14,7 @@ import {
   Sparkles,
   ExternalLink,
   ChevronRight,
+  Compass,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -33,8 +34,15 @@ export const Sidebar: React.FC<SidebarProps> = ({ stats }) => {
       name: "Job Feed",
       href: "/",
       icon: Briefcase,
-      badge: "Live",
+      badge: "6.3k+",
       badgeColor: "bg-emerald-500/20 text-emerald-400 border border-emerald-500/30",
+    },
+    {
+      name: "Platform Search",
+      href: "/platform-search",
+      icon: Compass,
+      badge: "10 Hubs",
+      badgeColor: "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30",
     },
     {
       name: "Saved Jobs",

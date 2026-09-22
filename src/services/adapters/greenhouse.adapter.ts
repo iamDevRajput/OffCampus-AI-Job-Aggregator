@@ -3,6 +3,7 @@ import { SourceType, WorkMode, EmploymentType } from "@prisma/client";
 import { NormalizationService } from "../normalization.service";
 import { ExtractionService } from "../extraction.service";
 import { DeduplicationService } from "../deduplication.service";
+import { fetchWithRetry } from "@/lib/fetch-utils";
 
 export class GreenhouseSourceAdapter implements SourceAdapter {
   sourceType: SourceType = SourceType.GREENHOUSE;
@@ -21,16 +22,14 @@ export class GreenhouseSourceAdapter implements SourceAdapter {
     const url = config.apiUrl || `https://boards-api.greenhouse.io/v1/boards/${boardToken}/jobs?content=true`;
 
     try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "OffCampusJobAggregator/2.0 (Compliant Educational Job Aggregator)",
-        },
-        cache: "no-store",
-      });
+      const response = await fetchWithRetry(url);
 
       if (!response.ok) {
-        throw new Error(`Greenhouse API returned HTTP ${response.status} (${response.statusText}) for board "${boardToken}"`);
+        if (response.status === 404) {
+          console.warn(`[GreenhouseAdapter] Board "${boardToken}" not found (404)`);
+          return [];
+        }
+        throw new Error(`Greenhouse API HTTP ${response.status} (${response.statusText}) for board "${boardToken}"`);
       }
 
       const data = await response.json();
@@ -117,7 +116,7 @@ export class GreenhouseSourceAdapter implements SourceAdapter {
   }
 
   private extractTokenFromUrl(url: string): string | null {
-    const match = url.match(/boards\/([^/?]+)/i);
+    const match = url.match(/boards\/([^/?]+)/i) || url.match(/greenhouse\.io\/([^/?]+)/i);
     return match ? match[1] : null;
   }
 }

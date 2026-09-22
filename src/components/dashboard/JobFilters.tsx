@@ -1,13 +1,15 @@
 "use client";
 
 import React from "react";
-import { Search, Filter, Sparkles, Building2, SlidersHorizontal, ArrowUpDown } from "lucide-react";
+import { Search, Filter, Sparkles, Building2, SlidersHorizontal, ArrowUpDown, Globe2 } from "lucide-react";
 import { PREFERRED_ROLE_OPTIONS } from "@/lib/constants";
 
-interface FiltersState {
+export interface FiltersState {
   search: string;
   role: string;
   workMode: string;
+  employmentType: string;
+  sourceType: string;
   priorityOnly: boolean;
   minSalary: string;
   sort: string;
@@ -15,12 +17,14 @@ interface FiltersState {
 
 interface JobFiltersProps {
   filters: FiltersState;
+  totalFound?: number;
   onChange: (newFilters: FiltersState) => void;
   onReset: () => void;
 }
 
 export const JobFilters: React.FC<JobFiltersProps> = ({
   filters,
+  totalFound,
   onChange,
   onReset,
 }) => {
@@ -38,10 +42,27 @@ export const JobFilters: React.FC<JobFiltersProps> = ({
     { label: "Onsite", value: "ONSITE" },
   ];
 
+  const sourceTypes = [
+    { label: "All Sources", value: "ALL" },
+    { label: "Greenhouse Boards", value: "GREENHOUSE" },
+    { label: "Lever Postings", value: "LEVER" },
+    { label: "Ashby Boards", value: "ASHBY" },
+    { label: "SmartRecruiters", value: "SMART_RECRUITERS" },
+    { label: "Recruitee Offers", value: "RECRUITEE" },
+    { label: "Public Tech Feeds", value: "PUBLIC_FEED" },
+  ];
+
+  const employmentTypes = [
+    { label: "All Job Types", value: "ALL" },
+    { label: "Full Time (Fresher/SDE)", value: "FULL_TIME" },
+    { label: "Internships", value: "INTERNSHIP" },
+    { label: "Contract / Freelance", value: "CONTRACT" },
+  ];
+
   const sortOptions = [
-    { label: "Best Profile Match %", value: "best-match" },
-    { label: "Priority Target Companies First", value: "priority-first" },
-    { label: "Newest Discovered", value: "newest" },
+    { label: "Best AI Match %", value: "best-match" },
+    { label: "Target Watchlist First", value: "priority-first" },
+    { label: "Latest Discovered", value: "newest" },
     { label: "Highest Package (CTC)", value: "highest-salary" },
     { label: "Application Deadline", value: "deadline" },
   ];
@@ -65,7 +86,7 @@ export const JobFilters: React.FC<JobFiltersProps> = ({
             type="text"
             value={filters.search}
             onChange={(e) => handleChange("search", e.target.value)}
-            placeholder="Search by role title, company (Google, Stripe), skill (React, Python), or city..."
+            placeholder="Search by role title, company (Stripe, Bosch, OpenAI), skills (React, Python), or location..."
             className="w-full bg-slate-900/90 text-sm text-slate-100 placeholder-slate-500 rounded-lg border border-slate-700/80 pl-10 pr-4 py-2.5 focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
           />
         </div>
@@ -80,7 +101,7 @@ export const JobFilters: React.FC<JobFiltersProps> = ({
           }`}
         >
           <Building2 className="w-4 h-4 text-amber-400" />
-          <span>Dream Companies Only</span>
+          <span>Dream Companies</span>
         </button>
 
         {/* Sort Dropdown */}
@@ -122,6 +143,35 @@ export const JobFilters: React.FC<JobFiltersProps> = ({
             ))}
           </div>
 
+          {/* Source Platform Filter */}
+          <div className="flex items-center gap-1.5 bg-slate-900 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs text-slate-300">
+            <Globe2 className="w-3.5 h-3.5 text-slate-400" />
+            <select
+              value={filters.sourceType}
+              onChange={(e) => handleChange("sourceType", e.target.value)}
+              className="bg-transparent text-slate-200 text-xs font-medium focus:outline-none cursor-pointer"
+            >
+              {sourceTypes.map((st) => (
+                <option key={st.value} value={st.value} className="bg-slate-900 text-slate-200">
+                  {st.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Employment Type Filter */}
+          <select
+            value={filters.employmentType}
+            onChange={(e) => handleChange("employmentType", e.target.value)}
+            className="bg-slate-900 text-slate-300 border border-slate-700/80 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-brand-500"
+          >
+            {employmentTypes.map((et) => (
+              <option key={et.value} value={et.value} className="bg-slate-900 text-slate-200">
+                {et.label}
+              </option>
+            ))}
+          </select>
+
           {/* Role Filter */}
           <select
             value={filters.role}
@@ -150,15 +200,29 @@ export const JobFilters: React.FC<JobFiltersProps> = ({
           </select>
         </div>
 
-        {/* Reset Filter Button */}
-        {(filters.search || filters.role || filters.workMode !== "ALL" || filters.priorityOnly || filters.minSalary) && (
-          <button
-            onClick={onReset}
-            className="text-[11px] font-semibold text-brand-400 hover:text-brand-300 transition-colors"
-          >
-            Reset Filters
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {typeof totalFound === "number" && (
+            <span className="text-[11px] font-medium text-slate-400">
+              Showing <span className="text-slate-200 font-bold">{totalFound.toLocaleString()}</span> jobs
+            </span>
+          )}
+
+          {/* Reset Filter Button */}
+          {(filters.search ||
+            filters.role ||
+            filters.workMode !== "ALL" ||
+            filters.employmentType !== "ALL" ||
+            filters.sourceType !== "ALL" ||
+            filters.priorityOnly ||
+            filters.minSalary) && (
+            <button
+              onClick={onReset}
+              className="text-[11px] font-semibold text-brand-400 hover:text-brand-300 transition-colors"
+            >
+              Reset Filters
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );

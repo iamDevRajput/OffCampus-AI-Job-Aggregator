@@ -1,7 +1,8 @@
 import { PrismaClient, ExperienceLevel, PriorityLevel, SourceType, WorkMode } from "@prisma/client";
 import bcrypt from "bcryptjs";
-import { STANDARD_SKILLS, POPULAR_TARGET_COMPANIES } from "../src/lib/constants";
+import { STANDARD_SKILLS } from "../src/lib/constants";
 import { IngestionService } from "../src/services/ingestion.service";
+import { ATS_PRESETS, PUBLIC_FEED_SOURCES } from "../src/lib/ats-registry";
 
 const prisma = new PrismaClient();
 
@@ -54,8 +55,10 @@ async function main() {
         "Software Development Engineer (SDE 1)",
         "Frontend Engineer",
         "Full Stack Developer",
+        "Backend Developer",
+        "AI/ML Engineer",
       ],
-      preferredLocations: ["Pan India", "Bengaluru", "Hyderabad", "Pune"],
+      preferredLocations: ["Pan India", "Bengaluru", "Hyderabad", "Pune", "Remote - India"],
       preferredWorkModes: [WorkMode.REMOTE, WorkMode.HYBRID, WorkMode.ONSITE],
       minSalary: 12,
     },
@@ -68,8 +71,10 @@ async function main() {
         "Software Development Engineer (SDE 1)",
         "Frontend Engineer",
         "Full Stack Developer",
+        "Backend Developer",
+        "AI/ML Engineer",
       ],
-      preferredLocations: ["Pan India", "Bengaluru", "Hyderabad", "Pune"],
+      preferredLocations: ["Pan India", "Bengaluru", "Hyderabad", "Pune", "Remote - India"],
       preferredWorkModes: [WorkMode.REMOTE, WorkMode.HYBRID, WorkMode.ONSITE],
       minSalary: 12,
     },
@@ -111,9 +116,9 @@ async function main() {
     }
   }
 
-  // 5. Seed Target Companies
+  // 5. Seed Target Companies from verified ATS registry
   console.log("-> Seeding target companies watchlist...");
-  for (const tc of POPULAR_TARGET_COMPANIES) {
+  for (const tc of ATS_PRESETS) {
     const existing = await prisma.targetCompany.findFirst({
       where: {
         userId: demoUser.id,
@@ -126,31 +131,43 @@ async function main() {
         data: {
           userId: demoUser.id,
           name: tc.name,
-          aliases: tc.aliases,
+          aliases: tc.aliases || [],
           careerPageUrl: tc.careerPageUrl,
-          sourceType: SourceType.MOCK,
-          priorityLevel: tc.priorityLevel as PriorityLevel,
+          sourceType: tc.sourceType,
+          boardToken: tc.boardToken,
+          priorityLevel: (tc.priorityLevel as PriorityLevel) || PriorityLevel.HIGH,
           isActive: true,
+        },
+      });
+    } else {
+      await prisma.targetCompany.update({
+        where: { id: existing.id },
+        data: {
+          sourceType: tc.sourceType,
+          boardToken: tc.boardToken,
+          careerPageUrl: tc.careerPageUrl,
         },
       });
     }
   }
 
-  // 6. Seed Job Sources
+  // 6. Seed Job Sources (Real ATS Boards + Public Tech Feeds)
   console.log("-> Registering job ingestion sources...");
   const sourcesData = [
-    {
-      name: "Off-Campus Verified Tech Feed",
-      type: SourceType.MOCK,
-      fetchFrequencyMinutes: 30,
-      isActive: true,
-    },
     {
       name: "Stripe Careers Adapter",
       type: SourceType.GREENHOUSE,
       boardToken: "stripe",
       fetchFrequencyMinutes: 60,
       apiUrl: "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true",
+      isActive: true,
+    },
+    {
+      name: "Cloudflare Careers Adapter",
+      type: SourceType.GREENHOUSE,
+      boardToken: "cloudflare",
+      fetchFrequencyMinutes: 60,
+      apiUrl: "https://boards-api.greenhouse.io/v1/boards/cloudflare/jobs?content=true",
       isActive: true,
     },
     {
@@ -169,6 +186,31 @@ async function main() {
       apiUrl: "https://api.ashbyhq.com/posting-api/job-board/openai",
       isActive: true,
     },
+    {
+      name: "Bosch Group Careers Adapter",
+      type: SourceType.SMART_RECRUITERS,
+      boardToken: "BoschGroup",
+      fetchFrequencyMinutes: 60,
+      apiUrl: "https://api.smartrecruiters.com/v1/companies/BoschGroup/postings",
+      isActive: true,
+    },
+    {
+      name: "bunq Careers Adapter",
+      type: SourceType.RECRUITEE,
+      boardToken: "bunq",
+      fetchFrequencyMinutes: 60,
+      apiUrl: "https://bunq.recruitee.com/api/offers/",
+      isActive: true,
+    },
+    ...PUBLIC_FEED_SOURCES.map((f) => ({
+      name: f.name,
+      type: f.type,
+      boardToken: f.boardToken,
+      baseUrl: f.baseUrl,
+      apiUrl: f.apiUrl,
+      fetchFrequencyMinutes: 30,
+      isActive: true,
+    })),
   ];
 
   for (const s of sourcesData) {
@@ -177,13 +219,18 @@ async function main() {
       await prisma.jobSource.create({
         data: s,
       });
+    } else {
+      await prisma.jobSource.update({
+        where: { id: existing.id },
+        data: {
+          type: s.type,
+          boardToken: s.boardToken,
+          apiUrl: s.apiUrl,
+          baseUrl: (s as any).baseUrl,
+        },
+      });
     }
   }
-
-  // 7. Run initial Mock Ingestion to populate jobs & match scores
-  console.log("-> Running initial ingestion & profile matching...");
-  const results = await IngestionService.runIngestion();
-  console.log("Ingestion results:", JSON.stringify(results, null, 2));
 
   console.log("✅ Seed completed successfully!");
 }

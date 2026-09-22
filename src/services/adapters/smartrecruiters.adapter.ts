@@ -3,6 +3,7 @@ import { SourceType, WorkMode, EmploymentType } from "@prisma/client";
 import { NormalizationService } from "../normalization.service";
 import { ExtractionService } from "../extraction.service";
 import { DeduplicationService } from "../deduplication.service";
+import { fetchWithRetry } from "@/lib/fetch-utils";
 
 export class SmartRecruitersSourceAdapter implements SourceAdapter {
   sourceType: SourceType = SourceType.SMART_RECRUITERS;
@@ -18,57 +19,102 @@ export class SmartRecruitersSourceAdapter implements SourceAdapter {
       (config.apiUrl ? this.extractCompanyFromUrl(config.apiUrl) : null) ||
       config.name.toLowerCase().replace(/[^\w]/g, "");
 
-    const url = config.apiUrl || `https://api.smartrecruiters.com/v1/companies/${companyId}/postings?limit=100`;
+    const rawJobs: RawJob[] = [];
+    const PAGE_LIMIT = 100;
+    let offset = 0;
+    let totalFound = Infinity;
+    const MAX_PAGES = 30; // Safety guard up to 3000 postings
 
-    try {
-      const response = await fetch(url, {
-        headers: {
-          Accept: "application/json",
-          "User-Agent": "OffCampusJobAggregator/2.0 (Compliant Educational Job Aggregator)",
-        },
-        cache: "no-store",
-      });
+    for (let page = 0; page < MAX_PAGES && offset < totalFound; page++) {
+      const url = `https://api.smartrecruiters.com/v1/companies/${companyId}/postings?limit=${PAGE_LIMIT}&offset=${offset}`;
 
-      if (!response.ok) {
-        throw new Error(`SmartRecruiters API returned HTTP ${response.status} (${response.statusText}) for company "${companyId}"`);
-      }
+      try {
+        const response = await fetchWithRetry(url);
 
-      const data = await response.json();
-      const rawJobs: RawJob[] = [];
+        if (!response.ok) {
+          if (response.status === 404) {
+            console.warn(`[SmartRecruitersAdapter] Company "${companyId}" not found (404)`);
+            break;
+          }
+          throw new Error(`SmartRecruiters API HTTP ${response.status} (${response.statusText}) for company "${companyId}"`);
+        }
 
-      if (data.content && Array.isArray(data.content)) {
+        const data = await response.json();
+
+        if (typeof data.totalFound === "number") {
+          totalFound = data.totalFound;
+        }
+
+        if (!data.content || !Array.isArray(data.content) || data.content.length === 0) {
+          break;
+        }
+
         for (const item of data.content) {
           const loc = item.location
-            ? `${item.location.city || ""}, ${item.location.country || ""}`.replace(/^, |, $/g, "") || "Pan India"
+            ? `${item.location.city || ""}, ${item.location.region || ""}, ${item.location.country || ""}`
+                .replace(/^, |, $/g, "")
+                .replace(/,\s*,/g, ",")
+                .trim() || "Pan India"
             : "Pan India";
 
+          let workMode: WorkMode = WorkMode.NOT_SPECIFIED;
+          if (item.location?.remote) workMode = WorkMode.REMOTE;
+          else if (item.location?.hybrid) workMode = WorkMode.HYBRID;
+
+          let empType: EmploymentType = EmploymentType.FULL_TIME;
+          if (item.typeOfEmployment?.id === "intern" || item.experienceLevel?.id === "internship") {
+            empType = EmploymentType.INTERNSHIP;
+          } else if (item.typeOfEmployment?.id === "contract" || item.typeOfEmployment?.id === "temporary") {
+            empType = EmploymentType.CONTRACT;
+          }
+
           const applyUrl = `https://jobs.smartrecruiters.com/${companyId}/${item.id}`;
+
+          // Format description from title, department, function, and industry
+          const departmentName = item.department?.label || "";
+          const functionName = item.function?.label || "";
+          const desc = `${item.name}. Function: ${functionName}. Department: ${departmentName}. ${loc}`;
 
           rawJobs.push({
             externalId: `sr-${item.id}`,
             title: item.name?.trim() || "Software Engineer",
-            company: config.name,
+            company: item.company?.name || config.name,
             location: loc,
+            workMode,
+            employmentType: empType,
             applyUrl,
-            description: item.name,
+            description: desc,
             postedAt: item.releasedDate ? new Date(item.releasedDate) : new Date(),
             rawPayload: item,
           });
         }
-      }
 
-      return rawJobs;
-    } catch (err: any) {
-      console.error(`[SmartRecruitersAdapter] Error fetching from ${url}:`, err.message || err);
-      throw err;
+        offset += PAGE_LIMIT;
+        if (offset >= totalFound || data.content.length < PAGE_LIMIT) {
+          break;
+        }
+
+        // Gentle spacing between page fetches
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      } catch (err: any) {
+        console.error(`[SmartRecruitersAdapter] Error fetching offset ${offset} from ${companyId}:`, err.message || err);
+        if (rawJobs.length > 0) {
+          break;
+        }
+        throw err;
+      }
     }
+
+    return rawJobs;
   }
 
   normalizeJob(raw: RawJob): NormalizedJob {
     const normalizedCompany = NormalizationService.normalizeCompany(raw.company);
     const normalizedLocation = NormalizationService.normalizeLocation(raw.location);
     const normalizedWorkMode =
-      raw.workMode || NormalizationService.normalizeWorkMode(undefined, `${raw.location} ${raw.description}`);
+      raw.workMode && raw.workMode !== WorkMode.NOT_SPECIFIED
+        ? raw.workMode
+        : NormalizationService.normalizeWorkMode(undefined, `${raw.location} ${raw.description}`);
     const normalizedEmployment =
       raw.employmentType || NormalizationService.normalizeEmploymentType(undefined, raw.title);
 
@@ -109,7 +155,7 @@ export class SmartRecruitersSourceAdapter implements SourceAdapter {
   }
 
   private extractCompanyFromUrl(url: string): string | null {
-    const match = url.match(/companies\/([^/?]+)/i);
+    const match = url.match(/companies\/([^/?]+)/i) || url.match(/smartrecruiters\.com\/([^/?]+)/i);
     return match ? match[1] : null;
   }
 }

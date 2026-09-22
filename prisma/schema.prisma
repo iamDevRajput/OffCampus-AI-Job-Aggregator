@@ -27,6 +27,8 @@ enum SourceType {
   LEVER
   ASHBY
   SMART_RECRUITERS
+  RECRUITEE
+  WORKABLE
   PUBLIC_FEED
   CUSTOM
 }
@@ -237,6 +239,8 @@ model Job {
   @@index([normalizedCompany])
   @@index([status])
   @@index([isPriorityCompany])
+  @@index([applyUrl])
+  @@index([sourceId])
   @@map("jobs")
 }
 

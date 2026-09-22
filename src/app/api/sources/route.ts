@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
   try {
     const body = await req.json();
-    const { name, type, baseUrl, apiUrl, fetchFrequencyMinutes, isActive } = body;
+    const { name, type, baseUrl, apiUrl, boardToken, fetchFrequencyMinutes, isActive } = body;
 
     if (!name) {
       return NextResponse.json({ error: "Source name is required" }, { status: 400 });
@@ -33,9 +33,10 @@ export async function POST(req: Request) {
     const source = await prisma.jobSource.create({
       data: {
         name: name.trim(),
-        type: type || SourceType.MOCK,
+        type: (type as SourceType) || SourceType.GREENHOUSE,
         baseUrl: baseUrl || null,
         apiUrl: apiUrl || null,
+        boardToken: boardToken || null,
         fetchFrequencyMinutes: fetchFrequencyMinutes ? parseInt(String(fetchFrequencyMinutes), 10) : 60,
         isActive: isActive !== undefined ? isActive : true,
       },

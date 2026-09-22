@@ -3,7 +3,6 @@
 import React, { useState, useEffect } from "react";
 import { SourceCard, SourceItem } from "@/components/sources/SourceCard";
 import { Button } from "@/components/ui/Button";
-import { Badge } from "@/components/ui/Badge";
 import {
   Radio,
   RefreshCw,
@@ -17,6 +16,8 @@ import {
   Clock,
   Plus,
   AlertCircle,
+  Globe2,
+  Database,
 } from "lucide-react";
 import { formatTimeAgo } from "@/lib/utils";
 
@@ -41,6 +42,13 @@ export default function SourcesPage() {
   const [isIngestingAll, setIsIngestingAll] = useState(false);
   const [ingestionLogs, setIngestionLogs] = useState<string[]>([]);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+
+  // Custom Source Modal State
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [newSourceName, setNewSourceName] = useState("");
+  const [newSourceType, setNewSourceType] = useState("GREENHOUSE");
+  const [newBoardToken, setNewBoardToken] = useState("");
+  const [isSubmittingSource, setIsSubmittingSource] = useState(false);
 
   const loadData = async () => {
     setIsLoading(true);
@@ -71,7 +79,7 @@ export default function SourcesPage() {
 
   const handleRunAll = async () => {
     setIsIngestingAll(true);
-    setIngestionLogs(["[Pipeline] Initializing automated sync across all active ATS adapters..."]);
+    setIngestionLogs(["[Pipeline] Initializing automated sync across all active ATS adapters and public feeds..."]);
     try {
       const res = await fetch("/api/cron/ingest-jobs", { method: "POST" });
       const data = await res.json();
@@ -82,7 +90,7 @@ export default function SourcesPage() {
         if (data.results && Array.isArray(data.results)) {
           for (const r of data.results) {
             logs.push(
-              `-> [${r.sourceType}] ${r.sourceName}: Fetched ${r.fetchedCount} raw posts | New: ${r.newJobsCount} | Updated: ${r.updatedCount} | Filtered: ${r.duplicateCount} (${r.durationMs}ms)`
+              `-> [${r.sourceType}] ${r.sourceName}: Fetched ${r.fetchedCount} posts | Created: ${r.newJobsCount} | Updated: ${r.updatedCount} | (${r.durationMs}ms)`
             );
             if (r.errors?.length > 0) {
               logs.push(`   [Error] ${r.errors.join("; ")}`);
@@ -90,9 +98,9 @@ export default function SourcesPage() {
           }
         }
         setIngestionLogs(logs);
-        setToastMessage("All ATS sources and target company feeds synced!");
+        setToastMessage("All sources successfully ingested & synced!");
         loadData();
-        setTimeout(() => setToastMessage(null), 3000);
+        setTimeout(() => setToastMessage(null), 4000);
       }
     } catch (err: any) {
       setIngestionLogs((prev) => [...prev, `[Pipeline Error] ${err.message || err}`]);
@@ -108,7 +116,7 @@ export default function SourcesPage() {
       const data = await res.json();
       if (res.ok) {
         setIngestionLogs([
-          `[Success] Source ingestion complete!`,
+          `[Success] Source sync complete!`,
           `Details: ${JSON.stringify(data.results, null, 2)}`,
         ]);
         setToastMessage("Source sync complete!");
@@ -146,6 +154,35 @@ export default function SourcesPage() {
     }
   };
 
+  const handleCreateCustomSource = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newSourceName.trim()) return;
+
+    setIsSubmittingSource(true);
+    try {
+      const res = await fetch("/api/sources", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: newSourceName.trim(),
+          type: newSourceType,
+          boardToken: newBoardToken.trim() || undefined,
+        }),
+      });
+
+      if (res.ok) {
+        setToastMessage(`Registered ${newSourceName} source!`);
+        setIsAddModalOpen(false);
+        setNewSourceName("");
+        setNewBoardToken("");
+        loadData();
+        setTimeout(() => setToastMessage(null), 3000);
+      }
+    } finally {
+      setIsSubmittingSource(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -156,7 +193,7 @@ export default function SourcesPage() {
             <span>Automated Ingestion Engine & ATS Adapters</span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Compliant adapters connecting to public Greenhouse, Lever, Ashby, and SmartRecruiters job boards.
+            Real multi-source ingestion discovering verified jobs across Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, and Public Developer Feeds.
           </p>
         </div>
 
@@ -197,25 +234,46 @@ export default function SourcesPage() {
         <div>
           <h4 className="font-bold text-slate-100">Zero-Scraping Compliance Guarantee</h4>
           <p className="text-slate-400 mt-0.5 leading-relaxed">
-            All adapters interface exclusively with standard public JSON API endpoints (Greenhouse, Lever, Ashby, SmartRecruiters). No login walls or anti-bot protections are bypassed.
+            All adapters interface exclusively with standard public JSON API endpoints (Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, and Open Feeds). No authentication or anti-bot protections are bypassed.
           </p>
         </div>
       </div>
 
       {/* Quick Add Preset Real Public ATS Sources */}
       <div className="glass-panel p-4 rounded-xl border border-slate-800 space-y-3">
-        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
-          <Building2 className="w-4 h-4 text-brand-400" />
-          <span>Quick Connect Verified Public ATS Boards</span>
-        </h4>
+        <div className="flex items-center justify-between">
+          <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+            <Building2 className="w-4 h-4 text-brand-400" />
+            <span>Quick Connect Verified Public ATS Boards</span>
+          </h4>
+
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setIsAddModalOpen(true)}
+            className="text-xs"
+          >
+            <Plus className="w-3.5 h-3.5 mr-1" />
+            Add Custom Company Board
+          </Button>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           {[
-            { name: "Stripe", type: "GREENHOUSE", boardToken: "stripe", apiUrl: "https://boards-api.greenhouse.io/v1/boards/stripe/jobs?content=true" },
-            { name: "Palantir", type: "LEVER", boardToken: "palantir", apiUrl: "https://api.lever.co/v0/postings/palantir?mode=json" },
-            { name: "OpenAI", type: "ASHBY", boardToken: "openai", apiUrl: "https://api.ashbyhq.com/posting-api/job-board/openai" },
-            { name: "Ramp", type: "ASHBY", boardToken: "ramp", apiUrl: "https://api.ashbyhq.com/posting-api/job-board/ramp" },
+            { name: "Stripe", type: "GREENHOUSE", boardToken: "stripe" },
+            { name: "Cloudflare", type: "GREENHOUSE", boardToken: "cloudflare" },
+            { name: "Palantir", type: "LEVER", boardToken: "palantir" },
+            { name: "Spotify", type: "LEVER", boardToken: "spotify" },
+            { name: "OpenAI", type: "ASHBY", boardToken: "openai" },
+            { name: "Bosch Group", type: "SMART_RECRUITERS", boardToken: "BoschGroup" },
+            { name: "bunq", type: "RECRUITEE", boardToken: "bunq" },
+            { name: "Arbeitnow Global Developer Feed", type: "PUBLIC_FEED", boardToken: "arbeitnow", apiUrl: "https://www.arbeitnow.com/api/job-board-api" },
+            { name: "WeWorkRemotely Tech RSS Feed", type: "PUBLIC_FEED", boardToken: "weworkremotely", apiUrl: "https://weworkremotely.com/categories/remote-programming-jobs.rss" },
+            { name: "RemoteOK Developer API Feed", type: "PUBLIC_FEED", boardToken: "remoteok", apiUrl: "https://remoteok.com/api" },
           ].map((preset) => {
-            const alreadyAdded = sources.some((s) => s.name.toLowerCase() === preset.name.toLowerCase());
+            const alreadyAdded = sources.some(
+              (s) => s.name.toLowerCase() === preset.name.toLowerCase() || (preset.boardToken && s.type === preset.type)
+            );
             return (
               <button
                 key={preset.name}
@@ -228,7 +286,7 @@ export default function SourcesPage() {
                     : "bg-slate-900 text-slate-300 hover:text-white hover:bg-slate-800 border-slate-700 active:scale-95"
                 }`}
               >
-                {alreadyAdded ? <Check className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5 text-brand-400" />}
+                {alreadyAdded ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Plus className="w-3.5 h-3.5 text-brand-400" />}
                 <span>{preset.name} ({preset.type})</span>
               </button>
             );
@@ -308,7 +366,7 @@ export default function SourcesPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60">
-                {runs.slice(0, 10).map((run) => (
+                {runs.slice(0, 15).map((run) => (
                   <tr key={run.id} className="hover:bg-slate-800/30 transition-colors">
                     <td className="py-2.5 px-3 text-slate-400 whitespace-nowrap">
                       {formatTimeAgo(run.createdAt)}
@@ -351,6 +409,77 @@ export default function SourcesPage() {
           </div>
         )}
       </div>
+
+      {/* Add Custom Source Modal */}
+      {isAddModalOpen && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="glass-panel p-6 rounded-xl border border-slate-700 w-full max-w-md space-y-4">
+            <h3 className="text-base font-bold text-white">Add Custom Public ATS Source</h3>
+            <p className="text-xs text-slate-400">
+              Enter the company name and public ATS board token (e.g. Greenhouse board slug, Lever site name, Ashby board ID, SmartRecruiters company ID).
+            </p>
+
+            <form onSubmit={handleCreateCustomSource} className="space-y-3.5">
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Company / Source Name</label>
+                <input
+                  type="text"
+                  required
+                  value={newSourceName}
+                  onChange={(e) => setNewSourceName(e.target.value)}
+                  placeholder="e.g. Uber, Airbnb, Databricks"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">ATS Platform Type</label>
+                <select
+                  value={newSourceType}
+                  onChange={(e) => setNewSourceType(e.target.value)}
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                >
+                  <option value="GREENHOUSE">Greenhouse (boards-api.greenhouse.io)</option>
+                  <option value="LEVER">Lever (api.lever.co/v0/postings)</option>
+                  <option value="ASHBY">Ashby (api.ashbyhq.com)</option>
+                  <option value="SMART_RECRUITERS">SmartRecruiters (api.smartrecruiters.com)</option>
+                  <option value="RECRUITEE">Recruitee (recruitee.com/api/offers)</option>
+                  <option value="WORKABLE">Workable (apply.workable.com)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-semibold text-slate-300 block mb-1">Board Token / Identifier</label>
+                <input
+                  type="text"
+                  value={newBoardToken}
+                  onChange={(e) => setNewBoardToken(e.target.value)}
+                  placeholder="e.g. stripe, palantir, openai, BoschGroup"
+                  className="w-full bg-slate-900 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-200 focus:outline-none focus:border-brand-500"
+                />
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setIsAddModalOpen(false)}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="submit"
+                  size="sm"
+                  isLoading={isSubmittingSource}
+                >
+                  Register Source
+                </Button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

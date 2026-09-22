@@ -2,11 +2,11 @@
 
 import React, { useState, useEffect, useCallback } from "react";
 import { JobCard, JobCardData } from "@/components/dashboard/JobCard";
-import { JobFilters } from "@/components/dashboard/JobFilters";
+import { JobFilters, FiltersState } from "@/components/dashboard/JobFilters";
 import { StatsOverview } from "@/components/dashboard/StatsOverview";
 import { JobDetailModal } from "@/components/dashboard/JobDetailModal";
 import { Button } from "@/components/ui/Button";
-import { Sparkles, RefreshCw, Briefcase, Plus, Filter, AlertCircle } from "lucide-react";
+import { Sparkles, RefreshCw, Briefcase, Plus, Filter, AlertCircle, ChevronLeft, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
 export default function DashboardPage() {
@@ -18,13 +18,21 @@ export default function DashboardPage() {
     savedCount: 0,
     appliedCount: 0,
   });
+  const [pagination, setPagination] = useState({
+    page: 1,
+    limit: 20,
+    totalCount: 0,
+    totalPages: 1,
+  });
   const [isLoading, setIsLoading] = useState(true);
   const [selectedJob, setSelectedJob] = useState<JobCardData | null>(null);
 
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<FiltersState>({
     search: "",
     role: "",
     workMode: "ALL",
+    employmentType: "ALL",
+    sourceType: "ALL",
     priorityOnly: false,
     minSalary: "",
     sort: "best-match",
@@ -37,9 +45,13 @@ export default function DashboardPage() {
       if (filters.search) params.set("search", filters.search);
       if (filters.role) params.set("role", filters.role);
       if (filters.workMode && filters.workMode !== "ALL") params.set("workMode", filters.workMode);
+      if (filters.employmentType && filters.employmentType !== "ALL") params.set("employmentType", filters.employmentType);
+      if (filters.sourceType && filters.sourceType !== "ALL") params.set("sourceType", filters.sourceType);
       if (filters.priorityOnly) params.set("priorityOnly", "true");
       if (filters.minSalary) params.set("minSalary", filters.minSalary);
       if (filters.sort) params.set("sort", filters.sort);
+      params.set("page", String(pagination.page));
+      params.set("limit", "20");
       params.set("status", "ACTIVE");
 
       const [jobsRes, statsRes] = await Promise.all([
@@ -50,6 +62,9 @@ export default function DashboardPage() {
       if (jobsRes.ok) {
         const jobsData = await jobsRes.json();
         setJobs(jobsData.jobs || []);
+        if (jobsData.pagination) {
+          setPagination(jobsData.pagination);
+        }
       }
 
       if (statsRes.ok) {
@@ -61,12 +76,11 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
-  }, [filters]);
+  }, [filters, pagination.page]);
 
   useEffect(() => {
     fetchJobs();
 
-    // Polling interval every 30 seconds for real-time freshness
     const interval = setInterval(fetchJobs, 30000);
     return () => clearInterval(interval);
   }, [fetchJobs]);
@@ -77,7 +91,6 @@ export default function DashboardPage() {
         .map((j) => (j.id === jobId ? { ...j, userStatus: newStatus as any } : j))
         .filter((j) => newStatus !== "IGNORED")
     );
-    // Refresh stats
     fetch("/api/dashboard/stats")
       .then((res) => res.json())
       .then(setStats)
@@ -89,10 +102,13 @@ export default function DashboardPage() {
       search: "",
       role: "",
       workMode: "ALL",
+      employmentType: "ALL",
+      sourceType: "ALL",
       priorityOnly: false,
       minSalary: "",
       sort: "best-match",
     });
+    setPagination((prev) => ({ ...prev, page: 1 }));
   };
 
   return (
@@ -101,13 +117,13 @@ export default function DashboardPage() {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-white flex items-center gap-2">
-            <span>Verified Off-Campus Openings</span>
+            <span>Verified Off-Campus Tech Feed</span>
             <span className="text-xs px-2.5 py-0.5 rounded-full bg-brand-500/20 text-brand-300 border border-brand-500/30 font-medium">
               Ranked by AI Match
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Aggregated from verified career portals, Greenhouse, and Lever boards.
+            Aggregated from Greenhouse, Lever, Ashby, SmartRecruiters, Recruitee, and verified public tech career feeds.
           </p>
         </div>
 
@@ -126,7 +142,7 @@ export default function DashboardPage() {
           <Link href="/watchlist">
             <Button size="sm" variant="secondary" className="text-xs">
               <Plus className="w-3.5 h-3.5" />
-              <span>Add Target Company</span>
+              <span>Add Dream Company</span>
             </Button>
           </Link>
         </div>
@@ -138,7 +154,11 @@ export default function DashboardPage() {
       {/* Filter and Search Bar */}
       <JobFilters
         filters={filters}
-        onChange={setFilters}
+        totalFound={pagination.totalCount}
+        onChange={(newFilters) => {
+          setFilters(newFilters);
+          setPagination((prev) => ({ ...prev, page: 1 }));
+        }}
         onReset={handleResetFilters}
       />
 
@@ -165,7 +185,7 @@ export default function DashboardPage() {
           <div className="max-w-md mx-auto">
             <h3 className="text-base font-bold text-slate-200">No matching job openings found</h3>
             <p className="text-xs text-slate-400 mt-1">
-              Try adjusting your search criteria, removing filter restrictions, or running the ingestion adapter to fetch the latest postings.
+              Try adjusting your search query, removing filter restrictions, or running the ingestion adapter.
             </p>
           </div>
           <div className="flex items-center justify-center gap-3 pt-2">
@@ -178,15 +198,51 @@ export default function DashboardPage() {
           </div>
         </div>
       ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {jobs.map((job) => (
-            <JobCard
-              key={job.id}
-              job={job}
-              onStatusChange={handleStatusChange}
-              onSelectDetail={(j) => setSelectedJob(j)}
-            />
-          ))}
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            {jobs.map((job) => (
+              <JobCard
+                key={job.id}
+                job={job}
+                onStatusChange={handleStatusChange}
+                onSelectDetail={(j) => setSelectedJob(j)}
+              />
+            ))}
+          </div>
+
+          {/* Pagination Controls */}
+          {pagination.totalPages > 1 && (
+            <div className="flex items-center justify-between p-4 glass-panel rounded-xl border border-slate-800 text-xs">
+              <span className="text-slate-400">
+                Page <span className="text-slate-200 font-bold">{pagination.page}</span> of{" "}
+                <span className="text-slate-200 font-bold">{pagination.totalPages}</span> ({pagination.totalCount.toLocaleString()} total jobs)
+              </span>
+
+              <div className="flex items-center gap-2">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pagination.page <= 1}
+                  onClick={() => setPagination((prev) => ({ ...prev, page: Math.max(1, prev.page - 1) }))}
+                  className="text-xs px-3"
+                >
+                  <ChevronLeft className="w-3.5 h-3.5 mr-1" />
+                  Previous
+                </Button>
+
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={pagination.page >= pagination.totalPages}
+                  onClick={() => setPagination((prev) => ({ ...prev, page: Math.min(prev.totalPages, prev.page + 1) }))}
+                  className="text-xs px-3"
+                >
+                  Next
+                  <ChevronRight className="w-3.5 h-3.5 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
