@@ -1,0 +1,299 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum ExperienceLevel {
+  FRESHER
+  INTERNSHIP
+  ZERO_TO_ONE
+  ONE_TO_TWO
+  MORE_THAN_TWO
+}
+
+enum PriorityLevel {
+  HIGH
+  MEDIUM
+  LOW
+}
+
+enum SourceType {
+  MOCK
+  GREENHOUSE
+  LEVER
+  ASHBY
+  SMART_RECRUITERS
+  PUBLIC_FEED
+  CUSTOM
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ONSITE
+  NOT_SPECIFIED
+}
+
+enum EmploymentType {
+  FULL_TIME
+  INTERNSHIP
+  CONTRACT
+  NOT_SPECIFIED
+}
+
+enum JobStatus {
+  ACTIVE
+  EXPIRED
+  ARCHIVED
+}
+
+enum ApplicationStatus {
+  SAVED
+  APPLIED
+  IGNORED
+}
+
+enum AlertType {
+  PRIORITY_COMPANY
+  HIGH_MATCH
+  DEADLINE_SOON
+}
+
+enum AlertChannel {
+  EMAIL
+  IN_APP
+  TELEGRAM
+  WHATSAPP
+}
+
+enum AlertStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+model User {
+  id              String          @id @default(uuid())
+  name            String
+  email           String          @unique
+  passwordHash    String
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+
+  profile         Profile?
+  userSkills      UserSkill[]
+  targetCompanies TargetCompany[]
+  jobMatches      JobMatch[]
+  savedJobs       SavedJob[]
+  alerts          Alert[]
+
+  @@map("users")
+}
+
+model Profile {
+  id                 String           @id @default(uuid())
+  userId             String           @unique
+  user               User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  college            String?
+  batchYear          Int?
+  experienceLevel    ExperienceLevel  @default(FRESHER)
+  preferredRoles     String[]         @default([])
+  preferredLocations String[]         @default([])
+  preferredWorkModes WorkMode[]       @default([REMOTE, HYBRID, ONSITE])
+  minSalary          Float?           // In LPA
+  resumeUrl          String?
+  rawResumeText      String?          @db.Text
+  createdAt          DateTime         @default(now())
+  updatedAt          DateTime         @updatedAt
+
+  @@map("profiles")
+}
+
+model Skill {
+  id             String      @id @default(uuid())
+  name           String
+  category       String      // e.g., "Frontend", "Backend", "Languages", "Cloud/DevOps", "Data/AI", "Core CS"
+  normalizedName String      @unique
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  userSkills     UserSkill[]
+  jobSkills      JobSkill[]
+
+  @@map("skills")
+}
+
+model UserSkill {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  skillId   String
+  skill     Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  level     String   @default("INTERMEDIATE") // BEGINNER, INTERMEDIATE, ADVANCED, EXPERT
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, skillId])
+  @@map("user_skills")
+}
+
+model TargetCompany {
+  id             String        @id @default(uuid())
+  userId         String
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name           String
+  aliases        String[]      @default([])
+  careerPageUrl  String?
+  sourceType     SourceType    @default(MOCK)
+  boardToken     String?       // ATS token e.g. "stripe", "cloudflare", "postman"
+  priorityLevel  PriorityLevel @default(HIGH)
+  isActive       Boolean       @default(true)
+  lastCheckedAt  DateTime?
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  jobs           Job[]
+
+  @@map("target_companies")
+}
+
+model JobSource {
+  id                    String     @id @default(uuid())
+  name                  String
+  type                  SourceType @default(MOCK)
+  baseUrl               String?
+  apiUrl                String?
+  boardToken            String?    // ATS token / identifier
+  isActive              Boolean    @default(true)
+  fetchFrequencyMinutes Int        @default(60)
+  lastFetchedAt         DateTime?
+  lastError             String?    @db.Text
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  jobs                  Job[]
+
+  @@map("job_sources")
+}
+
+model IngestionRun {
+  id             String      @id @default(uuid())
+  sourceId       String?
+  sourceName     String
+  sourceType     SourceType
+  status         String      // SUCCESS, FAILED, PARTIAL
+  jobsFetched    Int         @default(0)
+  jobsCreated    Int         @default(0)
+  jobsUpdated    Int         @default(0)
+  duplicateCount Int         @default(0)
+  errors         String[]    @default([])
+  durationMs     Int         @default(0)
+  createdAt      DateTime    @default(now())
+
+  @@map("ingestion_runs")
+}
+
+model Job {
+  id                String          @id @default(uuid())
+  sourceId          String?
+  source            JobSource?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
+  targetCompanyId   String?
+  targetCompany     TargetCompany?  @relation(fields: [targetCompanyId], references: [id], onDelete: SetNull)
+  externalId        String?
+  title             String
+  company           String
+  normalizedCompany String
+  description       String          @db.Text
+  applyUrl          String
+  location          String          @default("Pan India")
+  workMode          WorkMode        @default(NOT_SPECIFIED)
+  employmentType    EmploymentType  @default(FULL_TIME)
+  minSalary         Float?          // Extracted LPA or absolute figure
+  maxSalary         Float?          // Extracted LPA or absolute figure
+  currency          String          @default("INR")
+  salaryDisclosed   Boolean         @default(false)
+  salaryRaw         String?         // e.g., "18 - 24 LPA" or "₹45,000/month"
+  experienceMin     Int?            @default(0)
+  experienceMax     Int?            @default(1)
+  deadline          DateTime?
+  postedAt          DateTime?
+  discoveredAt      DateTime        @default(now())
+  contentHash       String          @unique
+  isPriorityCompany Boolean         @default(false)
+  status            JobStatus       @default(ACTIVE)
+  rawData           String?         @db.Text
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+
+  jobSkills         JobSkill[]
+  jobMatches        JobMatch[]
+  savedJobs         SavedJob[]
+  alerts            Alert[]
+
+  @@index([normalizedCompany])
+  @@index([status])
+  @@index([isPriorityCompany])
+  @@map("jobs")
+}
+
+model JobSkill {
+  id         String   @id @default(uuid())
+  jobId      String
+  job        Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  skillId    String
+  skill      Skill    @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  confidence Float    @default(1.0)
+  createdAt  DateTime @default(now())
+
+  @@unique([jobId, skillId])
+  @@map("job_skills")
+}
+
+model JobMatch {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job      @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  score     Int      // 0 to 100
+  reasons   String[] @default([])
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, jobId])
+  @@map("job_matches")
+}
+
+model SavedJob {
+  id        String            @id @default(uuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job               @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  status    ApplicationStatus @default(SAVED)
+  notes     String?           @db.Text
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([userId, jobId])
+  @@map("saved_jobs")
+}
+
+model Alert {
+  id        String       @id @default(uuid())
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobId     String
+  job       Job          @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  type      AlertType    @default(HIGH_MATCH)
+  channel   AlertChannel @default(IN_APP)
+  status    AlertStatus  @default(PENDING)
+  sentAt    DateTime?
+  createdAt DateTime     @default(now())
+
+  @@map("alerts")
+}
