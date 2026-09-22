@@ -78,6 +78,14 @@ enum AlertStatus {
   FAILED
 }
 
+enum ConnectionStatus {
+  CONNECTED
+  EXTERNAL
+  ERROR
+  DISABLED
+  UNKNOWN
+}
+
 model User {
   id              String          @id @default(uuid())
   name            String
@@ -155,6 +163,8 @@ model TargetCompany {
   priorityLevel  PriorityLevel @default(HIGH)
   isActive       Boolean       @default(true)
   lastCheckedAt  DateTime?
+  companyRefId   String?
+  companyRef     Company?      @relation(fields: [companyRefId], references: [id], onDelete: SetNull)
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
@@ -205,6 +215,8 @@ model Job {
   source            JobSource?      @relation(fields: [sourceId], references: [id], onDelete: SetNull)
   targetCompanyId   String?
   targetCompany     TargetCompany?  @relation(fields: [targetCompanyId], references: [id], onDelete: SetNull)
+  companyRefId      String?
+  companyRef        Company?        @relation(fields: [companyRefId], references: [id], onDelete: SetNull)
   externalId        String?
   title             String
   company           String
@@ -241,6 +253,7 @@ model Job {
   @@index([isPriorityCompany])
   @@index([applyUrl])
   @@index([sourceId])
+  @@index([companyRefId])
   @@map("jobs")
 }
 
@@ -301,3 +314,69 @@ model Alert {
 
   @@map("alerts")
 }
+
+model Company {
+  id                      String              @id @default(uuid())
+  companyId               String              @unique // CMP-000001
+  slug                    String              @unique
+  name                    String
+  normalizedName          String              @unique
+  officialWebsite         String?
+  careerUrl               String
+  industry                String?
+  country                 String              @default("India")
+  primaryLocations        String[]            @default(["India"])
+  logoUrl                 String?
+  coverImageUrl           String?
+  active                  Boolean             @default(true)
+  notificationEnabled     Boolean             @default(false)
+  notificationPreferences Json?
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
+
+  aliases                 CompanyAlias[]
+  connections             CompanyConnection[]
+  targetCompanyRefs       TargetCompany[]
+  jobs                    Job[]
+
+  @@index([normalizedName])
+  @@index([slug])
+  @@index([companyId])
+  @@index([industry])
+  @@map("companies")
+}
+
+model CompanyAlias {
+  id                   String   @id @default(uuid())
+  companyId            String
+  company              Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  alias                String
+  normalizedAlias      String
+  isPotentialDuplicate Boolean  @default(false)
+  createdAt            DateTime @default(now())
+
+  @@unique([companyId, normalizedAlias])
+  @@index([normalizedAlias])
+  @@map("company_aliases")
+}
+
+model CompanyConnection {
+  id            String           @id @default(uuid())
+  companyId     String
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  atsType       SourceType
+  boardToken    String
+  apiUrl        String?
+  status        ConnectionStatus @default(CONNECTED)
+  lastCheckedAt DateTime?
+  lastSuccessAt DateTime?
+  lastError     String?          @db.Text
+  jobCount      Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  @@index([companyId])
+  @@index([status])
+  @@map("company_connections")
+}
+

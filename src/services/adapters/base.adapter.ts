@@ -52,6 +52,7 @@ export interface SourceConfig {
   apiUrl?: string | null;
   boardToken?: string | null;
   targetCompanyId?: string | null;
+  companyRefId?: string | null;
   extraConfig?: Record<string, any>;
 }
 

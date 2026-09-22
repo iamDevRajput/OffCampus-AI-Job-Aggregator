@@ -45,6 +45,13 @@ export const Sidebar: React.FC<SidebarProps> = ({ stats }) => {
       badgeColor: "bg-indigo-500/20 text-indigo-300 border border-indigo-500/30",
     },
     {
+      name: "Company Careers",
+      href: "/companies",
+      icon: Building2,
+      badge: "183",
+      badgeColor: "bg-purple-500/20 text-purple-300 border border-purple-500/30",
+    },
+    {
       name: "Saved Jobs",
       href: "/saved?tab=saved",
       icon: Bookmark,

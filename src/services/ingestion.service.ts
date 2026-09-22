@@ -29,6 +29,7 @@ export interface IngestionSummary {
 
 export interface IngestionOptions {
   targetSourceId?: string;
+  customSource?: SourceConfig;
   includePresets?: boolean;
   includeMock?: boolean;
   maxSources?: number;
@@ -56,7 +57,9 @@ export class IngestionService {
     // 1. Gather candidate sources to run
     let sourcesToRun: SourceConfig[] = [];
 
-    if (targetSourceId) {
+    if (options.customSource) {
+      sourcesToRun.push(options.customSource);
+    } else if (targetSourceId) {
       const source = await prisma.jobSource.findUnique({
         where: { id: targetSourceId },
       });
@@ -164,9 +167,16 @@ export class IngestionService {
       sourcesToRun = sourcesToRun.slice(0, maxSources);
     }
 
-    // Preload all target companies, skills, and active users for fast in-memory indexing
-    const [allTargetCompanies, allSkills, allUsers] = await Promise.all([
+    // Preload all target companies, companies registry, skills, and active users for fast in-memory indexing
+    const [allTargetCompanies, allCompanies, allSkills, allUsers] = await Promise.all([
       prisma.targetCompany.findMany({ where: { isActive: true } }),
+      prisma.company.findMany({
+        select: {
+          id: true,
+          normalizedName: true,
+          aliases: { select: { normalizedAlias: true } },
+        },
+      }),
       prisma.skill.findMany(),
       prisma.user.findMany({ select: { id: true } }),
     ]);
@@ -185,7 +195,7 @@ export class IngestionService {
 
       const chunkResults = await Promise.all(
         chunk.map((sourceConfig) =>
-          this.processSingleSource(sourceConfig, allTargetCompanies, skillMap, allUsers)
+          this.processSingleSource(sourceConfig, allTargetCompanies, allCompanies, skillMap, allUsers)
         )
       );
 
@@ -206,6 +216,7 @@ export class IngestionService {
   private static async processSingleSource(
     sourceConfig: SourceConfig,
     allTargetCompanies: any[],
+    allCompanies: any[],
     skillMap: Map<string, string>,
     allUsers: { id: string }[]
   ): Promise<IngestionSummary> {
@@ -245,6 +256,13 @@ export class IngestionService {
             return (tc.aliases || []).some((a: string) => NormalizationService.normalizeCompany(a) === normCompany);
           });
 
+          // Check Company registry mapping
+          const matchedCompany = allCompanies.find((c) => {
+            if (c.normalizedName === normCompany) return true;
+            return (c.aliases || []).some((a: any) => a.normalizedAlias === normCompany);
+          });
+          const resolvedCompanyRefId = sourceConfig.companyRefId || matchedCompany?.id || null;
+
           let savedJobId: string;
           let isNew = false;
 
@@ -265,6 +283,7 @@ export class IngestionService {
                 deadline: normalized.deadline ?? existingJob.deadline,
                 isPriorityCompany: !!matchedTargetCompany || existingJob.isPriorityCompany,
                 targetCompanyId: matchedTargetCompany?.id || existingJob.targetCompanyId,
+                companyRefId: resolvedCompanyRefId || existingJob.companyRefId,
                 status: JobStatus.ACTIVE,
                 updatedAt: new Date(),
               },
@@ -276,6 +295,7 @@ export class IngestionService {
               data: {
                 sourceId: sourceConfig.id || null,
                 targetCompanyId: matchedTargetCompany?.id || sourceConfig.targetCompanyId || null,
+                companyRefId: resolvedCompanyRefId,
                 externalId: normalized.externalId,
                 title: normalized.title,
                 company: normalized.company,
